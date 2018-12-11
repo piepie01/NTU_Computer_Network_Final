@@ -20,6 +20,7 @@
 #include <string>
 #include "client.h"
 #include "connect.h"
+#include "command.h"
 using namespace std;
 
 void print_logo(){
@@ -191,16 +192,21 @@ int Search_Command(char command[], int *command_ind, char Commands[][20], int Co
     return match;
     
 }
-int Get_Command(char command[], struct User *user_info, char Commands[][20], int Commands_num){
+int Get_Command(char command[], struct User *user_info, char Commands[][20], int Commands_num, char History[][20], int History_ind){
     printf("%s> ", user_info->username);
     const char BACKSPACE=127;
     const char TAB=9;
     const char RETURN=10;
+    const char DIR=27;
 
     int command_ind = 0;
     char ch = 0;
     int tab_num = 0;
+    int now_history = History_ind;
+    char space[100] = "\0";
+    memset(space, ' ', sizeof(space)-1);
     while((ch=getch())!=RETURN){
+        //cout << (int)ch << endl;
         if(ch == TAB) tab_num++;
         else if(ch == BACKSPACE){
             tab_num = 0;
@@ -209,10 +215,39 @@ int Get_Command(char command[], struct User *user_info, char Commands[][20], int
                 command[--command_ind] = '\0';
             }
         }
+        else if(ch == DIR){
+            ch = getch();
+            ch = getch();
+            if(ch == 65 && History_ind!=0){
+                strcpy(History[History_ind--], command);
+                memset(command, 0, 20);
+                strcpy(command, History[History_ind]);
+                command_ind = strlen(command);
+                printf("\r%s\r%s> %s", space, user_info->username, command);
+            };
+            if(ch == 66 && History_ind!=now_history+1){
+                strcpy(History[History_ind++], command);
+                if(strlen(command) == 0 && History_ind == now_history+1) History_ind--;
+                memset(command, 0, 20);
+                strcpy(command, History[History_ind]);
+                command_ind = strlen(command);
+                printf("\r%s\r%s> %s", space, user_info->username, command);
+            };
+            if(ch == 67 && command_ind != (int)strlen(command)){ //right
+                //printf("%d %d\n",command_ind, strlen(command));
+                printf("%c", command[command_ind++]);
+            }
+            if(ch == 68 && command_ind != 0){ //left
+                printf("\b");
+                command_ind--;
+            }
+        }
         else{
+            for(int i=20-2;i>=command_ind;i--) command[i+1] = command[i];
             command[command_ind++] = ch;
             tab_num = 0;
-            printf("%c",ch);
+            printf("%s",&command[command_ind-1]);
+            for(int i=command_ind;i<(int)strlen(command);i++) printf("\b");
         }
         if(tab_num == 1){
             if(Search_Command(command, &command_ind, Commands, Commands_num, 0) == 1) tab_num--; 
@@ -246,14 +281,40 @@ int Parse_Commands(char Commands[][20]){
     return num;
     
 }
+int Parse_func(int (*Commands_func[])(struct User*)){
+    Commands_func[0] = Cmd_quit;
+    Commands_func[1] = Cmd_users;
+    Commands_func[2] = Cmd_friend;
+    Commands_func[3] = Cmd_whoami;
+    Commands_func[4] = Cmd_file;
+    return 0;
+}
 int Command_Interface(struct User *user_info){
     char Commands[50][20];
+    char History[10000][20];
+    int History_ind = 0;
     memset(Commands, 0, sizeof(Commands));
+    memset(History, 0, sizeof(History));
     int Commands_num = Parse_Commands(Commands);
+    int (*Commands_func[50])(struct User*);
+    Parse_func(Commands_func);
     while(1){
         char command[20] = "\0";
-        int ret = Get_Command(command, user_info, Commands, Commands_num);
-        printf("%s\n",command);
+        int ret = Get_Command(command, user_info, Commands, Commands_num, History, History_ind);
+        int match_cmd = 0, cmd_ret = 0;
+        for(int i=0;i<Commands_num;i++){
+            if(strcmp(Commands[i], command) == 0){
+                match_cmd = 1;
+                cmd_ret = (*Commands_func[i])(user_info);
+                strcpy(History[History_ind++], command);
+            }
+            else if(strlen(command) == 0) match_cmd = 1;
+        }
+        if(!match_cmd){
+            printf("%s command not found~\n",command);
+            strcpy(History[History_ind++], command);
+        }
+        if(cmd_ret == -1) break;
         
     }
     return 0;
@@ -276,6 +337,7 @@ int main(int argc, char *argv[]){
     print_logo();
 
     Command_Interface(&user_info);
+    close(sockfd);
 
     return 0;
 }
