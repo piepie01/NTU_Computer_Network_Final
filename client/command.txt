@@ -1,0 +1,5 @@
+quit
+users
+friend
+whoami
+file

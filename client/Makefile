@@ -7,7 +7,7 @@ CC=g++
 CFLAGS=-O2 -pthread
 
 all:
-	$(CC) -Wall -g -o client $(CFLAGS) client.c json_include/cJSON/cJSON.c
+	$(CC) -Wall -g -o client $(CFLAGS) client.c json_include/cJSON/cJSON.c connect.c
 
 
 clean:

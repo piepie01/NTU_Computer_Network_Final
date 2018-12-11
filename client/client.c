@@ -9,16 +9,17 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <time.h>
-#include<sys/time.h>
+#include <sys/time.h>
 #include <arpa/inet.h>
 #include "json_include/cJSON/cJSON.h"
-#define CONNECT_MAX 99
 
 #include <termios.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <iostream>
 #include <string>
+#include "client.h"
+#include "connect.h"
 using namespace std;
 
 void print_logo(){
@@ -38,38 +39,7 @@ void print_logo(){
     return;
 }
 
-struct connection{
-    int port;
-    char ip[20];
-    struct timeval timeout;
-    int times;
-};
 
-char trash[1000000];
-int hostname_to_ip(char * hostname , char* ip)
-{
-    struct hostent *he;
-    struct in_addr **addr_list;
-    int i;
-
-    if ( (he = gethostbyname( hostname ) ) == NULL)
-    {
-        // get the host info
-        herror("gethostbyname");
-        return 1;
-    }
-
-    addr_list = (struct in_addr **) he->h_addr_list;
-
-    for(i = 0; addr_list[i] != NULL; i++)
-    {
-        //Return the first one;
-        strcpy(ip , inet_ntoa(*addr_list[i]) );
-        return 0;
-    }
-
-    return 1;
-}
 void parse_arg(int argc, char *argv[], struct connection *connect_info){
     if(argc < 2){
         printf("./client ip:port\n");
@@ -89,28 +59,6 @@ void parse_arg(int argc, char *argv[], struct connection *connect_info){
     //printf("===SERVER===\n");
     //printf("[IP]:%d\n[PORT]%s\n", connect_info->port, connect_info->ip);
     return;
-}
-int Connect(struct connection *connect_info){
-    int sockfd = 0;
-    sockfd = socket(AF_INET , SOCK_STREAM , 0);
-
-    if (sockfd == -1){
-        printf("Fail to create a socket.");
-    }
-
-    struct sockaddr_in info;
-    bzero(&info,sizeof(info));
-    info.sin_family = PF_INET;
-    info.sin_addr.s_addr = inet_addr(connect_info->ip);
-    info.sin_port = htons(connect_info->port);
-
-    int err = connect(sockfd,(struct sockaddr *)&info,sizeof(info));
-    if(err==-1){
-        printf("Connection error\n");
-        pthread_exit(NULL);    
-    }
-    return sockfd;
-
 }
 int getch() {
     int ch;
@@ -187,7 +135,7 @@ int Register(int sockfd){
     else printf("\U0001F196 [1;31mUsername has been used[0m \U0001F196\n");
     return 0;
 }
-int Login_Register(int sockfd){
+int Login_Register(int sockfd, struct User *user_info){
     string username, passwd;
 
     username = get_stdin("Username", true, true);
@@ -214,26 +162,120 @@ int Login_Register(int sockfd){
 
     char ret;
     recv(sockfd, &ret, 1, 0);
-    if(ret == '1') return 1;
+    if(ret == '1'){
+        strcpy(user_info->username, username.c_str());
+        strcpy(user_info->passwd, passwd.c_str());
+        return 1;
+    }
     else return 0;
     return 0;
 }
-int main(int argc, char *argv[])
-{
+int Search_Command(char command[], int *command_ind, char Commands[][20], int Commands_num, int all){
+    int match = 0;
+    char tmp_cmd[20] = "\0";
+    char space[10] = "\0";
+    memset(space, ' ', sizeof(space)-1);
+    for(int i=0;i<Commands_num;i++){
+        if(strncmp(command, Commands[i], strlen(command)) == 0){
+            match++;
+            strcpy(tmp_cmd, Commands[i]);
+            if(all == 1) printf("%c%s%s", " \n"[(match-1)%3==0], tmp_cmd, &space[strlen(tmp_cmd)]);
+        }
+    }
+    if(all == 0 && match == 1){
+
+        strcpy(command, tmp_cmd);
+        printf("%s", &command[*command_ind]);
+        *command_ind = strlen(command);
+    }
+    return match;
+    
+}
+int Get_Command(char command[], struct User *user_info, char Commands[][20], int Commands_num){
+    printf("%s> ", user_info->username);
+    const char BACKSPACE=127;
+    const char TAB=9;
+    const char RETURN=10;
+
+    int command_ind = 0;
+    char ch = 0;
+    int tab_num = 0;
+    while((ch=getch())!=RETURN){
+        if(ch == TAB) tab_num++;
+        else if(ch == BACKSPACE){
+            tab_num = 0;
+            if(strlen(command) != 0){
+                printf("\b \b");
+                command[--command_ind] = '\0';
+            }
+        }
+        else{
+            command[command_ind++] = ch;
+            tab_num = 0;
+            printf("%c",ch);
+        }
+        if(tab_num == 1){
+            if(Search_Command(command, &command_ind, Commands, Commands_num, 0) == 1) tab_num--; 
+        }
+        else if(tab_num == 2){
+            if(Search_Command(command, &command_ind, Commands, Commands_num, 1)) printf("\n%s> %s", user_info->username, command);
+            tab_num = 0;
+            
+        }
+    }
+    printf("\n");
+    return 0;
+}
+int Parse_Commands(char Commands[][20]){
+    FILE *pFile;
+    char buffer[5000];
+    pFile = fopen( "command.txt", "r" );
+    if ( NULL == pFile ){
+        printf( "Open command.txt failure" );
+        return 0;
+    }else fread( buffer, 5000, 1, pFile );
+    fclose(pFile);
+
+    int num = 0, len = strlen(buffer), ind = 0;
+    for(int i=0;i<len;i++){
+        if(buffer[i] == '\n'){
+            Commands[++num][ind] = '\0';
+            ind = 0;
+        }else Commands[num][ind++] = buffer[i];
+    }
+    return num;
+    
+}
+int Command_Interface(struct User *user_info){
+    char Commands[50][20];
+    memset(Commands, 0, sizeof(Commands));
+    int Commands_num = Parse_Commands(Commands);
+    while(1){
+        char command[20] = "\0";
+        int ret = Get_Command(command, user_info, Commands, Commands_num);
+        printf("%s\n",command);
+        
+    }
+    return 0;
+}
+int main(int argc, char *argv[]){
     struct connection connect_info;
+    struct User user_info;
     parse_arg(argc, argv, &connect_info);
 
-    //print_logo();
     int sockfd = Connect(&connect_info);
     int ret = 2, cnt = 0;
     cout << "\U0001F680 [32;1mPress ESC to register[0m" << endl;
     while(ret == 2 || (ret == 0 && cnt != 3)){      //ret = 0(fail), 1(success), 2(register)
         cout << endl << "\U0001F340 [47;34;1mLogin[0m \U0001F340" << endl;
-        ret = Login_Register(sockfd);
+        ret = Login_Register(sockfd, &user_info);
         if(ret == 0) printf("\U0001F6AB [1;31mWrong Username or Passwd, remain [0m[1;35m%d[0m [1;31mtimes[0m\n", 3-(++cnt));
     }
     printf("\U0001F197 [1;32mLogin succeed[0m \U0001F197\n");
     sleep(1);
     print_logo();
+
+    Command_Interface(&user_info);
+
     return 0;
 }
