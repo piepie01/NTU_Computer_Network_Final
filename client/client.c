@@ -22,21 +22,52 @@
 #include "connect.h"
 #include "command.h"
 using namespace std;
+/*
+void Flush_term(){
+    printf("\033[%d;%dH", 0, 0);
+    for(int i=0;i<100;i++)
+        for(int j=0;j<200;j++) printf("%c", " \n"[j==199]);
+    printf("\033[%d;%dH", 0, 0);
+    return;
+}
+*/
+void print_logo_line(char buffer[], int times){
+    Flush_term();
+    int len = strlen(buffer), ret = 0;
+    char space[60] = "\0";
+    memset(space, ' ', sizeof(space)-1);
+    for(int i=0;i<len;i++){
+        if(ret >= 16 && buffer[i-1] == '\n') printf("%s", &space[times]);
+        printf("%c", buffer[i]);
+        if(buffer[i] == '\n') ret++;
+    }
 
+    usleep(200000);
+    return;
+}
 void print_logo(){
     FILE *pFile;
-    char buffer[5000];
+    char buffer[5000], buffer2[5000];
 
     pFile = fopen( "logo", "r" );
     if ( NULL == pFile ){
         printf( "Open LOGO failure" );
         return;
-    }else{
-        fread( buffer, 5000, 1, pFile );
-        printf( "%s", buffer );
-    }
-
+    }else fread( buffer, 5000, 1, pFile );
     fclose(pFile);
+
+    pFile = fopen( "logo3", "r" );
+    if ( NULL == pFile ){
+        printf( "Open LOGO failure" );
+        return;
+    }else fread( buffer2, 5000, 1, pFile );
+    fclose(pFile);
+    int times = 0;
+    for(int i=0;i<7;i++){
+        print_logo_line(buffer, times+=2);
+        print_logo_line(buffer2, times+=2);
+    }
+    Flush_term();
     return;
 }
 
@@ -61,6 +92,7 @@ void parse_arg(int argc, char *argv[], struct connection *connect_info){
     //printf("[IP]:%d\n[PORT]%s\n", connect_info->port, connect_info->ip);
     return;
 }
+/*
 int getch() {
     int ch;
     struct termios t_old, t_new;
@@ -75,7 +107,7 @@ int getch() {
     tcsetattr(STDIN_FILENO, TCSANOW, &t_old);
     return ch;
 }
-
+*/
 
 
 
@@ -117,6 +149,7 @@ string get_stdin(string prompt, bool show_asterisk=true, bool visable=true){
     return password;
 }
 int Register(int sockfd){
+    Flush_term();
     cout << endl << "\U0001F680 [44;32;1mRegister[0m \U0001F680" << endl;
     string username, passwd;
     username = get_stdin("Username", true, true);
@@ -141,14 +174,12 @@ int Login_Register(int sockfd, struct User *user_info){
 
     username = get_stdin("Username", true, true);
     if(username == "Register"){
-        cout << endl;
         Register(sockfd);
         return 2;
     }
 
     passwd = get_stdin("Password", true, false);
     if(passwd == "Register"){
-        cout << endl;
         Register(sockfd);
         return 2;
     }
@@ -203,7 +234,7 @@ int Get_Command(char command[], struct User *user_info, char Commands[][20], int
     char ch = 0;
     int tab_num = 0;
     int now_history = History_ind;
-    char space[100] = "\0";
+    char space[50] = "\0";
     memset(space, ' ', sizeof(space)-1);
     while((ch=getch())!=RETURN){
         //cout << (int)ch << endl;
@@ -281,7 +312,7 @@ int Parse_Commands(char Commands[][20]){
     return num;
     
 }
-int Parse_func(int (*Commands_func[])(struct User*)){
+int Parse_func(int (*Commands_func[])(struct User*, int)){
     Commands_func[0] = Cmd_quit;
     Commands_func[1] = Cmd_users;
     Commands_func[2] = Cmd_friend;
@@ -289,14 +320,14 @@ int Parse_func(int (*Commands_func[])(struct User*)){
     Commands_func[4] = Cmd_file;
     return 0;
 }
-int Command_Interface(struct User *user_info){
+int Command_Interface(struct User *user_info, int sockfd){
     char Commands[50][20];
     char History[10000][20];
     int History_ind = 0;
     memset(Commands, 0, sizeof(Commands));
     memset(History, 0, sizeof(History));
     int Commands_num = Parse_Commands(Commands);
-    int (*Commands_func[50])(struct User*);
+    int (*Commands_func[50])(struct User*, int);
     Parse_func(Commands_func);
     while(1){
         char command[20] = "\0";
@@ -305,7 +336,7 @@ int Command_Interface(struct User *user_info){
         for(int i=0;i<Commands_num;i++){
             if(strcmp(Commands[i], command) == 0){
                 match_cmd = 1;
-                cmd_ret = (*Commands_func[i])(user_info);
+                cmd_ret = (*Commands_func[i])(user_info, sockfd);
                 strcpy(History[History_ind++], command);
             }
             else if(strlen(command) == 0) match_cmd = 1;
@@ -320,23 +351,27 @@ int Command_Interface(struct User *user_info){
     return 0;
 }
 int main(int argc, char *argv[]){
+    Command_var_init();
     struct connection connect_info;
     struct User user_info;
     parse_arg(argc, argv, &connect_info);
 
     int sockfd = Connect(&connect_info);
     int ret = 2, cnt = 0;
-    cout << "\U0001F680 [32;1mPress ESC to register[0m" << endl;
     while(ret == 2 || (ret == 0 && cnt != 3)){      //ret = 0(fail), 1(success), 2(register)
+        Flush_term();
+        cout << "\U0001F680 [32;1mPress ESC to register[0m" << endl;
+        if(cnt != 0) printf("\U0001F6AB [1;31mWrong Username or Passwd, remain [0m[1;35m%d[0m [1;31mtimes[0m\n", 3-cnt);
+
         cout << endl << "\U0001F340 [47;34;1mLogin[0m \U0001F340" << endl;
         ret = Login_Register(sockfd, &user_info);
-        if(ret == 0) printf("\U0001F6AB [1;31mWrong Username or Passwd, remain [0m[1;35m%d[0m [1;31mtimes[0m\n", 3-(++cnt));
+        if(ret == 0) cnt++;
     }
     printf("\U0001F197 [1;32mLogin succeed[0m \U0001F197\n");
     sleep(1);
     print_logo();
 
-    Command_Interface(&user_info);
+    Command_Interface(&user_info, sockfd);
     close(sockfd);
 
     return 0;

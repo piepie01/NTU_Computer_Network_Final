@@ -56,6 +56,8 @@ void buf_init(){
     
     char user_dir[6] = "User\0";
     if(access(user_dir, F_OK) != 0) mkdir(user_dir, 0755);
+    char messages_dir[10] = "Messages\0";
+    if(access(messages_dir, F_OK) != 0) mkdir(messages_dir, 0755);
 	return;
 }
 
@@ -151,19 +153,175 @@ int handle_idle(int fd, cJSON *root){
         send(fd, &ret_char[ret], 1, 0);
         if(ret == 2){
             printf("Login succeed!\n");
-            return DONGDONG_STATUS_LOGIN;
+            strcpy(user_data[fd].user.name, username->valuestring);
+            return DONGDONG_STATUS_ONLINE;
         }
 
     }
     return DONGDONG_STATUS_IDLE;
 }
-int handle_command(int fd,cJSON *root){
+cJSON* Get_users_list(int mode, int fd){
+    FILE *pFile;
+    pFile = fopen( "User/account.json","r" );
+    if(pFile == NULL) return 0;
+    char buf[4096] = {0};
+    fread(buf, 4095, 1, pFile);
+    fclose(pFile);
+
+    int start = 0, len = strlen(buf);
+    char tmp[4096] = {0};
+    char tmp_users[CONNECT_MAX][64];
+    int tmp_status[CONNECT_MAX] = {0}, tmp_len = 0;
+    memset(tmp_users, 0, sizeof(tmp_users));
+    for(int i = 0;i<len;i++){
+        tmp[i-start] = buf[i];
+        if(buf[i] == '}'){
+            cJSON *root = cJSON_Parse(tmp);
+            memset(tmp, 0, 4096);
+            start = i+1;
+            cJSON *user = cJSON_GetObjectItemCaseSensitive(root, "username");
+            for(int j=0;j<CONNECT_MAX;j++){
+                if(j == fd) continue;  //user himself/herself
+                else if(strcmp(user->valuestring, user_data[j].user.name) == 0){
+                    strcpy(tmp_users[tmp_len], user->valuestring);
+                    tmp_status[tmp_len++] = 1;
+                    break;
+                }
+                else if(j == CONNECT_MAX - 1)
+                    strcpy(tmp_users[tmp_len++], user->valuestring);
+            }
+        }
+    }
+	cJSON *ret = cJSON_CreateObject();
+    cJSON_AddStringToObject(ret, "cmd", "Get_users");
+    cJSON *arr = cJSON_CreateArray();
+    for(int i=0;i<tmp_len;i++){
+        cJSON *obj = cJSON_CreateObject();
+        cJSON_AddStringToObject(obj, "username", tmp_users[i]);
+        cJSON_AddNumberToObject(obj, "online", tmp_status[i]);
+        cJSON_AddItemToArray(arr, obj);
+    }
+    cJSON_AddItemToObject(ret, "data", arr);
+	printf("%s\n",cJSON_Print(ret));
+    
+	return ret;
+}
+int Get_chat_history(char history[], cJSON *me, cJSON *you){
+    char file1[64] = "Messages/\0";
+    strcat(file1, me->valuestring);
+    strcat(file1, you->valuestring);
+    FILE *pFile = fopen( file1,"r" );
+    if(pFile != NULL){
+        fread(history, 60000-1, 1, pFile);
+        if(strlen(history) == 0) history[0] = '\n';
+        fclose(pFile);
+        return 0;
+    }
+    char file2[64] = "Messages/\0";
+    strcat(file2, you->valuestring);
+    strcat(file2, me->valuestring);
+    pFile = fopen( file2,"r" );
+    if(pFile != NULL){
+        fread(history, 60000-1, 1, pFile);
+        if(strlen(history) == 0) history[0] = '\n';
+        fclose(pFile);
+        return 0;
+    }
+    pFile = fopen( file1,"w" );
+    fclose(pFile);
+    history[0] = '\n';
+    return 0;
+
+
+}
+int Write_chat_history(cJSON *me, cJSON *you, cJSON *message){
+    char file1[64] = "Messages/\0";
+    strcat(file1, me->valuestring);
+    strcat(file1, you->valuestring);
+    FILE *pFile = fopen( file1,"r" );
+    if(pFile != NULL){
+        fclose(pFile);
+        FILE *pFile = fopen( file1,"a" );
+        fwrite(me->valuestring, strlen(me->valuestring), 1, pFile);
+        fwrite(">", 1, 1, pFile);
+        fwrite(message->valuestring, strlen(message->valuestring), 1, pFile);
+        fwrite("\n", 1, 1, pFile);
+        fclose(pFile);
+        return 0;
+    }
+    char file2[64] = "Messages/\0";
+    strcat(file2, you->valuestring);
+    strcat(file2, me->valuestring);
+    pFile = fopen( file2,"r" );
+    if(pFile != NULL){
+        fclose(pFile);
+        FILE *pFile = fopen( file2,"a" );
+        fwrite(me->valuestring, strlen(me->valuestring), 1, pFile);
+        fwrite(">", 1, 1, pFile);
+        fwrite(message->valuestring, strlen(message->valuestring), 1, pFile);
+        fwrite("\n", 1, 1, pFile);
+        fclose(pFile);
+        return 0;
+    }
+    return 0;
+
+
+}
+int handle_online(int fd, cJSON *root){
 	cJSON *cmd = cJSON_GetObjectItemCaseSensitive(root, "cmd");
+    if(strcmp("Get_users\0", cmd->valuestring) == 0){
+        printf("In Get_users\n");
+        cJSON *root = Get_users_list(0, fd);
+        char *send_root  = cJSON_PrintUnformatted(root);
+        send(fd, send_root, strlen(send_root), 0);
+        cJSON_Delete(root);
+        return DONGDONG_STATUS_ONLINE;
+    }
+    if(strcmp("Chatroom\0", cmd->valuestring) == 0){
+	    cJSON *me = cJSON_GetObjectItemCaseSensitive(root, "me");
+	    cJSON *you = cJSON_GetObjectItemCaseSensitive(root, "you");
+        char history[60000];
+        memset(history, 0, sizeof(history));
+        Get_chat_history(history, me, you);
+        printf("history len : %d\n", strlen(history));
+        send(fd, history, strlen(history), 0);
+        return DONGDONG_STATUS_CHATROOM;
+        
+    }
+    return DONGDONG_STATUS_ONLINE;
+}
+int handle_chatroom(int fd, cJSON *root){
+	cJSON *cmd = cJSON_GetObjectItemCaseSensitive(root, "cmd");
+    if(strcmp("Chat\0", cmd->valuestring) == 0){
+        printf("In Chat\n");
+	    cJSON *me = cJSON_GetObjectItemCaseSensitive(root, "me");
+	    cJSON *you = cJSON_GetObjectItemCaseSensitive(root, "you");
+	    cJSON *message = cJSON_GetObjectItemCaseSensitive(root, "message");
+        for(int i=0;i<CONNECT_MAX;i++){
+            if(strcmp(you->valuestring, user_data[i].user.name) == 0 && user_data[i].status == DONGDONG_STATUS_CHATROOM)
+                send(i, cJSON_Print(root), strlen(cJSON_Print(root)), 0);
+        }
+        Write_chat_history(me, you, message);
+        return DONGDONG_STATUS_CHATROOM;
+    }
+    if(strcmp("Quit\0", cmd->valuestring) == 0){
+        return DONGDONG_STATUS_ONLINE;
+    }
+    return DONGDONG_STATUS_CHATROOM;
+}
+int handle_command(int fd,cJSON *root){
+	//cJSON *cmd = cJSON_GetObjectItemCaseSensitive(root, "cmd");
 	printline();
 	printf("%s\n",cJSON_Print(root));
     if(user_data[fd].status == DONGDONG_STATUS_IDLE){
         int next_status = handle_idle(fd, root);
         user_data[fd].status = next_status;
+    }
+    else if(user_data[fd].status == DONGDONG_STATUS_ONLINE){
+        user_data[fd].status = handle_online(fd, root);
+    }
+    else if(user_data[fd].status == DONGDONG_STATUS_CHATROOM){
+        user_data[fd].status = handle_chatroom(fd, root);
     }
 	return 0;
 }
@@ -215,6 +373,7 @@ int main(int argc, char **argv){
 						cJSON *root = GET_JSON(fd);
 						if(root != NULL){
 							handle_command(fd, root);
+                            cJSON_Delete(root);
 						}
 					}
 				}

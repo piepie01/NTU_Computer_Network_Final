@@ -15,3 +15,6 @@ cd client
 make
 ./client [hostname]:[port]
 ```
+### Add command
+* server
+    * ```command.txt```, ```Parse_func() in client.c```, ```command.c command.h```
