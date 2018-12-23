@@ -264,9 +264,8 @@ int Write_chat_history(cJSON *me, cJSON *you, cJSON *message){
         return 0;
     }
     return 0;
-
-
 }
+
 int handle_online(int fd, cJSON *root){
 	cJSON *cmd = cJSON_GetObjectItemCaseSensitive(root, "cmd");
     if(strcmp("Get_users\0", cmd->valuestring) == 0){
@@ -298,8 +297,9 @@ int handle_chatroom(int fd, cJSON *root){
 	    cJSON *you = cJSON_GetObjectItemCaseSensitive(root, "you");
 	    cJSON *message = cJSON_GetObjectItemCaseSensitive(root, "message");
         for(int i=0;i<CONNECT_MAX;i++){
-            if(strcmp(you->valuestring, user_data[i].user.name) == 0 && user_data[i].status == DONGDONG_STATUS_CHATROOM)
-                send(i, cJSON_Print(root), strlen(cJSON_Print(root)), 0);
+            if(strcmp(you->valuestring, user_data[i].user.name) == 0 && user_data[i].status == DONGDONG_STATUS_CHATROOM){
+	            send(i, cJSON_Print(root), strlen(cJSON_Print(root)), 0);            	
+            }
         }
         Write_chat_history(me, you, message);
         return DONGDONG_STATUS_CHATROOM;
