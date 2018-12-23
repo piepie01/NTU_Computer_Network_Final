@@ -30,6 +30,14 @@ void Flush_term(){
     printf("\033[%d;%dH", 0, 0);
     return;
 }
+
+void Flush_line(){
+    printf("\033[%d;%dH", 0, 0);
+    printf("%s", &space[10000 - w.ws_row]);
+    printf("\033[%d;%dH", 0, 0);
+    return;
+}
+
 void Flush_term_size(int row, int col){
     printf("\033[%d;%dH", 0, 0);
     for(int i=0;i<row;i++) printf("%s", &space[10000 - w.ws_col]);
@@ -74,7 +82,7 @@ int Get_waiting_bytes(){
 }
 int Cmd_quit(struct User *user_info, int sockfd){
     printf("Bye bye %s~\n", user_info->username);
-    return -1;
+    return 127;
 }
 int Parse_users(char users[][64], int user_status[], int sockfd){
     cJSON *send_get_user = cJSON_CreateObject();
@@ -146,8 +154,14 @@ int Print_mode(int mode){
     else printf("%s%s", exit, &space[strlen(exit)]);
     printf("\n");
     return 0;
+}
+
+int Print_blacklist(){
+    char blacklist[11] = "BLACKLIST\0";
+    printf("[46m%s%s[0m", all, &space[strlen(all)]);
 
 }
+
 int Print_Chat(char history[], struct User *user_info){
     int width = 40, height = 20, len = strlen(history);
     if(len == 1) history[0] = '\0', len = 0;
@@ -285,8 +299,10 @@ int Cmd_users(struct User *user_info, int sockfd){
     int mode = USERS_STATUS_ALL, choose_mode = 0, choose = 0, choose_ind = 0;
     const char RETURN=10;
     const char DIR=27;
+    
     while(1){
         Flush_term();
+        //fprintf(stderr, "In Cmd_users\n");
         Print_mode(mode);
         int users_len = Parse_users(users, status, sockfd);
         int term_users = Print_users(users, status, users_len, mode, choose_mode, choose, &choose_ind);
@@ -305,7 +321,6 @@ int Cmd_users(struct User *user_info, int sockfd){
                 else if(ch == 65) choose-=3;
                 if(choose >= term_users) choose-=3;
                 else if(choose < 0) choose_mode = 0;
-                
             }
         }
         else if(ch == RETURN && choose_mode == 1){
@@ -316,6 +331,7 @@ int Cmd_users(struct User *user_info, int sockfd){
             break;
         }
     }
+    
     return 0;
 }
 int Cmd_friend(struct User *user_info, int sockfd){
@@ -325,5 +341,18 @@ int Cmd_whoami(struct User *user_info, int sockfd){
     return 0;
 }
 int Cmd_file(struct User *user_info, int sockfd){
+    return 0;
+}
+
+int Cmd_blacklist(struct User *user_info, int sockfd){
+
+    return 0;
+}
+int Cmd_help(struct User *user_info, int sockfd){
+    printf(">users\n    start chatting!\n");
+    printf(">friend\n    add friend\n");
+    printf(">whoami\n    WHOAMI?\n");
+    printf(">file\n    file\n");
+    printf(">quit\n");
     return 0;
 }
