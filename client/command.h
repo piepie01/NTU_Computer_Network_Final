@@ -7,9 +7,11 @@ typedef enum{
 } users_status;
 void Command_var_init();
 void Flush_term();
+void Flush_line();
 int getch();
 int Cmd_quit(struct User*, int sockfd);
 int Cmd_users(struct User*, int sockfd);
 int Cmd_friend(struct User*, int sockfd);
 int Cmd_whoami(struct User*, int sockfd);
 int Cmd_file(struct User*, int sockfd);
+int Cmd_help(struct User*, int sockfd);
