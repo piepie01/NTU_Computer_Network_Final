@@ -12,6 +12,8 @@
 #include <sys/time.h>
 #include <arpa/inet.h>
 #include "json_include/cJSON/cJSON.h"
+#include <signal.h>
+#include <sys/wait.h>
 
 #include <termios.h>
 #include <unistd.h>
@@ -73,7 +75,7 @@ void print_logo(){
 
 
 void parse_arg(int argc, char *argv[], struct connection *connect_info){
-    if(argc < 2){
+    if(argc != 2){
         printf("./client ip:port\n");
         return;
     }
@@ -301,7 +303,6 @@ int Parse_Commands(char Commands[][20]){
         return 0;
     }else fread( buffer, 5000, 1, pFile );
     fclose(pFile);
-
     int num = 0, len = strlen(buffer), ind = 0;
     for(int i=0;i<len;i++){
         if(buffer[i] == '\n'){
@@ -310,7 +311,6 @@ int Parse_Commands(char Commands[][20]){
         }else Commands[num][ind++] = buffer[i];
     }
     return num;
-    
 }
 int Parse_func(int (*Commands_func[])(struct User*, int)){
     Commands_func[0] = Cmd_quit;
@@ -318,6 +318,7 @@ int Parse_func(int (*Commands_func[])(struct User*, int)){
     Commands_func[2] = Cmd_friend;
     Commands_func[3] = Cmd_whoami;
     Commands_func[4] = Cmd_file;
+    Commands_func[5] = Cmd_help;    
     return 0;
 }
 int Command_Interface(struct User *user_info, int sockfd){
@@ -329,14 +330,17 @@ int Command_Interface(struct User *user_info, int sockfd){
     int Commands_num = Parse_Commands(Commands);
     int (*Commands_func[50])(struct User*, int);
     Parse_func(Commands_func);
+    int cmd_ret;
     while(1){
         char command[20] = "\0";
         int ret = Get_Command(command, user_info, Commands, Commands_num, History, History_ind);
-        int match_cmd = 0, cmd_ret = 0;
+        int match_cmd = 0;
+        cmd_ret = 0;
         for(int i=0;i<Commands_num;i++){
+            //fprintf(stdout, "---%s---%s---\n", Commands[i], command);
             if(strcmp(Commands[i], command) == 0){
                 match_cmd = 1;
-                cmd_ret = (*Commands_func[i])(user_info, sockfd);
+                cmd_ret = (*Commands_func[i])(user_info, sockfd);//Cmd_xxxx
                 strcpy(History[History_ind++], command);
             }
             else if(strlen(command) == 0) match_cmd = 1;
@@ -345,34 +349,64 @@ int Command_Interface(struct User *user_info, int sockfd){
             printf("%s command not found~\n",command);
             strcpy(History[History_ind++], command);
         }
-        if(cmd_ret == -1) break;
-        
+        if(cmd_ret == 127) return cmd_ret;
     }
-    return 0;
+    return 1;
 }
 int main(int argc, char *argv[]){
     Command_var_init();
     struct connection connect_info;
     struct User user_info;
     parse_arg(argc, argv, &connect_info);
+    //signal(SIGPIPE, SIG_IGN);
+    int ret = 2, cnt = 0; 
+    int reconnect = 3;
+    while(1){ //reconnect
+        reconnect --;
+        pid_t pid;
+        pid = fork();
+        if(pid == 0){//child, close if receive SIGPIPE
+            int sockfd = Connect(&connect_info);
+            while(ret == 2 || (ret == 0 && cnt != 3)){      //ret = 0(fail), 1(success), 2(register)
+//                Flush_term();
+                cout << "\U0001F680 [32;1mPress ESC to register[0m" << endl;
+                if(cnt != 0) printf("\U0001F6AB [1;31mWrong Username or Passwd, remain [0m[1;35m%d[0m [1;31mtimes[0m\n", 3-cnt);
 
-    int sockfd = Connect(&connect_info);
-    int ret = 2, cnt = 0;
-    while(ret == 2 || (ret == 0 && cnt != 3)){      //ret = 0(fail), 1(success), 2(register)
-        Flush_term();
-        cout << "\U0001F680 [32;1mPress ESC to register[0m" << endl;
-        if(cnt != 0) printf("\U0001F6AB [1;31mWrong Username or Passwd, remain [0m[1;35m%d[0m [1;31mtimes[0m\n", 3-cnt);
-
-        cout << endl << "\U0001F340 [47;34;1mLogin[0m \U0001F340" << endl;
-        ret = Login_Register(sockfd, &user_info);
-        if(ret == 0) cnt++;
+                cout << endl << "\U0001F340 [47;34;1mLogin[0m \U0001F340" << endl;
+                ret = Login_Register(sockfd, &user_info);
+                if(ret == 0) cnt++;
+            }
+            printf("\U0001F197 [1;32mLogin succeed[0m \U0001F197\n");
+            sleep(1);
+        //    print_logo();
+            int sat = 1;
+            sat = Command_Interface(&user_info, sockfd); //quit command return 127 to sat
+            close(sockfd);
+            //printf("sat = %d\n", sat);
+            exit(sat);
+        }
+        else if(pid > 0){ //parent
+            int status;
+            waitpid(pid, &status, 0);
+            int returned = WEXITSTATUS(status);
+            if(returned == 127){ //child "quit"
+                return 0;
+            }
+            else{
+                Flush_term();
+                for(int sec = 3; sec>=0; sec--){
+                    Flush_line();
+                    fprintf(stdout, "Connection failed, auto-reconnect in %d seconds:\n", sec);
+                    sleep(1);      
+                }
+                printf("Reconnecting to server...\n");
+                sleep(1);                   
+            }
+        }
+        if(reconnect<0){
+            break;
+        }
     }
-    printf("\U0001F197 [1;32mLogin succeed[0m \U0001F197\n");
-    sleep(1);
-    print_logo();
-
-    Command_Interface(&user_info, sockfd);
-    close(sockfd);
-
+    printf("\n\n\nSorry, please try again later... (._.)\n\n");
     return 0;
 }
