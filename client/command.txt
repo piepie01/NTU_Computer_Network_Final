@@ -3,3 +3,5 @@ users
 friend
 whoami
 file
+help
+blacklist
