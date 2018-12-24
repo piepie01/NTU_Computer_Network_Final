@@ -319,6 +319,7 @@ int Parse_func(int (*Commands_func[])(struct User*, int)){
     Commands_func[3] = Cmd_whoami;
     Commands_func[4] = Cmd_file;
     Commands_func[5] = Cmd_help;    
+    Commands_func[6] = Cmd_blacklist;
     return 0;
 }
 int Command_Interface(struct User *user_info, int sockfd){
@@ -346,7 +347,7 @@ int Command_Interface(struct User *user_info, int sockfd){
             else if(strlen(command) == 0) match_cmd = 1;
         }
         if(!match_cmd){
-            printf("%s command not found~\n",command);
+            printf("%s command not found~ type the help command for more information~ \n",command);
             strcpy(History[History_ind++], command);
         }
         if(cmd_ret == 127) return cmd_ret;
@@ -368,7 +369,7 @@ int main(int argc, char *argv[]){
         if(pid == 0){//child, close if receive SIGPIPE
             int sockfd = Connect(&connect_info);
             while(ret == 2 || (ret == 0 && cnt != 3)){      //ret = 0(fail), 1(success), 2(register)
-//                Flush_term();
+                Flush_term();
                 cout << "\U0001F680 [32;1mPress ESC to register[0m" << endl;
                 if(cnt != 0) printf("\U0001F6AB [1;31mWrong Username or Passwd, remain [0m[1;35m%d[0m [1;31mtimes[0m\n", 3-cnt);
 
