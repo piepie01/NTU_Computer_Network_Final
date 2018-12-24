@@ -84,6 +84,32 @@ int Cmd_quit(struct User *user_info, int sockfd){
     printf("Bye bye %s~\n", user_info->username);
     return 127;
 }
+int Find_in_file(char targetstr[], char file[], int deletemode, int sockfd, struct User* user_info){
+    char blacklist[10][64];
+    memset(blacklist, 0, sizeof(blacklist));
+    int blacklist_len = 0;
+    FILE *pFile = fopen(file, "r");
+    if(pFile == NULL){
+        pFile = fopen(file,"a");         
+    }
+    else{
+        size_t read, len=0;
+        char * line = NULL;
+        while((read = getline(&line, &len, pFile))!= -1){
+            strcpy(blacklist[blacklist_len], line); 
+            blacklist[blacklist_len][strlen(blacklist[blacklist_len])-1] = '\0';
+            blacklist_len++;                
+        }
+    }
+    fclose(pFile);
+    for(int i =0; i<blacklist_len; i++){
+        //printf("blacklist, target --%s--%s--\n", blacklist[i], targetstr);
+        if(strcmp(blacklist[i], targetstr) == 0){
+            return 1;
+        }
+    }
+    return 0;
+}
 int Parse_users(char users[][64], int user_status[], int sockfd){
     cJSON *send_get_user = cJSON_CreateObject();
     cJSON_AddStringToObject(send_get_user, "cmd", "Get_users");
@@ -138,6 +164,7 @@ int Print_users(char users[][64], int user_status[], int users_len, int mode, in
     }
     printf("\n");
     fflush(stdout);
+
     return ret;
 }
 int Print_mode(int mode){
@@ -156,10 +183,58 @@ int Print_mode(int mode){
     return 0;
 }
 
-int Print_blacklist(){
-    char blacklist[11] = "BLACKLIST\0";
-    printf("[46m%s%s[0m", all, &space[strlen(all)]);
+int Print_blacklist(int mode, char blacklist[][64], int blacklist_len, struct User *user_info, int sockfd, int choose_mode, int choose, int choose_ind){
+    char space[20] = "\0";
+    memset(space, ' ', sizeof(space)-1);    
+    char showblack[11] = "BLACKLIST\0", addblack[10] = "ADDBLACK\0", exitblack[6] = "EXIT\0";
+    if(mode == BLACKLIST_SHOW) printf("[46m%s%s[0m", showblack, &space[strlen(showblack)]);
+    else printf("%s%s", showblack, &space[strlen(showblack)]);    
+    if(mode == BLACKLIST_ADD) printf("[46m%s%s[0m", addblack, &space[strlen(addblack)]);
+    else printf("%s%s", addblack, &space[strlen(addblack)]);    
+    if(mode == BLACKLIST_EXIT) printf("[46m%s%s[0m", exitblack, &space[strlen(exitblack)]);
+    else printf("%s%s", exitblack, &space[strlen(exitblack)]);    
+    printf("\n");
 
+    memset(space, ' ', sizeof(space)-1);
+
+    if(mode == BLACKLIST_SHOW){
+        for(int i=0;i<blacklist_len;i++){
+            blacklist[i][strlen(blacklist[i])-1] = '\0';
+            if((choose_mode == 1 && choose == i)){
+                printf("%c[32;47m%s[0m%s", " \n"[(i)%3==0], blacklist[i], &space[strlen(blacklist[i])]);
+//                *choose_ind = i;
+            }
+            else
+                printf("%c%s%s", " \n"[(i)%3==0], blacklist[i], &space[strlen(blacklist[i])]);
+        }  
+    }
+    else if(mode == BLACKLIST_ADD){
+        char file[64] = "./Blacklist_\0";
+        strcat(file, user_info->username);
+        strcat(file, ".txt");                
+        FILE *pFile = fopen(file, "a");     
+        char black[64] = "\0";
+        printf("Who do you want to add to blacklist? (press any key to add)\n");
+        unsigned char ch=getch(), DIR=27;
+        if(ch == DIR){
+            ch = getch();
+            ch = getch();
+            if(ch == 68) return BLACKLIST_SHOW;
+            else if(ch == 67) return BLACKLIST_EXIT;
+        }
+        printf("his/her username: ");
+        scanf("%s", black);
+
+        printf("\n %s added to blacklist\n", black);   
+        sleep(1);       
+        black[strlen(black)] = '\n';
+        black[strlen(black)] = '\0';
+        int a = fwrite(black, sizeof(char), strlen(black), pFile);         
+        fclose(pFile);       
+    } 
+    printf("\n");
+    fflush(stdout);
+    return mode;
 }
 
 int Print_Chat(char history[], struct User *user_info){
@@ -208,14 +283,19 @@ int server_message(int sockfd){
     select(sockfd+1, &fds, NULL, NULL, &time);
     return FD_ISSET(sockfd,&fds);
 }
-int Chatroom(char target[], int sockfd, struct User *user_info){
+int Chatroom(char target[], char blacklistfile[], int sockfd, struct User *user_info){
     Flush_term();
+    if(Find_in_file(target, blacklistfile, 0, sockfd, user_info)){
+        printf("This user is in the blacklist!!! You don't have to receive his/her messages. Yaa!\n");
+        sleep(3);
+        return 0;
+    }    
     enable_raw_mode();
     
     cJSON *send_chatroom = cJSON_CreateObject();
     cJSON_AddStringToObject(send_chatroom, "cmd", "Chatroom");
     cJSON_AddStringToObject(send_chatroom, "me", user_info->username);
-    cJSON_AddStringToObject(send_chatroom, "you", target);
+    cJSON_AddStringToObject(send_chatroom, "you", target);   
     char *send_chatroom_json  = cJSON_PrintUnformatted(send_chatroom);
     send(sockfd, send_chatroom_json, strlen(send_chatroom_json), 0);
     send(sockfd,"\n",1,0);
@@ -324,7 +404,10 @@ int Cmd_users(struct User *user_info, int sockfd){
             }
         }
         else if(ch == RETURN && choose_mode == 1){
-            Chatroom(users[choose_ind], sockfd, user_info);
+            char file[64] = "./Blacklist_\0";
+            strcat(file, user_info->username);
+            strcat(file, ".txt");          
+            Chatroom(users[choose_ind], file, sockfd, user_info);
         }
         else if(ch == RETURN && mode == USERS_STATUS_EXIT){
             Flush_term();
@@ -334,6 +417,71 @@ int Cmd_users(struct User *user_info, int sockfd){
     
     return 0;
 }
+int Cmd_blacklist(struct User *user_info, int sockfd){
+    //fprintf(stderr,"Inblacklist\n");
+    char blacklist[10][64];
+    memset(blacklist, 0, sizeof(blacklist));
+
+    int mode = BLACKLIST_SHOW, choose_mode = 0, choose = 0, choose_ind = 0;
+    const char RETURN=10;
+    const char DIR=27;
+
+    while(1){        
+        Flush_term();
+        char file[64] = "./Blacklist_\0";
+        strcat(file, user_info->username);
+        strcat(file, ".txt");        
+        int blacklist_len = 0;
+        FILE *pFile = fopen(file, "r");
+        if(pFile == NULL){
+            pFile = fopen(file,"a");         
+        }
+        else{
+            size_t read, len=0;
+            char * line = NULL;
+            while((read = getline(&line, &len, pFile))!= -1){
+                strcpy(blacklist[blacklist_len], line); 
+                //printf("getline blacklist = %s\n", blacklist[blacklist_len]);
+                blacklist_len++;                
+            }
+        }
+        fclose(pFile);  
+        int mode2 = Print_blacklist(mode, blacklist, blacklist_len, user_info, sockfd, choose_mode, choose, choose_ind);    
+        if(mode2 != mode){
+            mode = mode2;
+            continue;
+        }
+        unsigned char ch = getch();
+        if(ch == DIR){
+            ch = getch();
+            ch = getch();
+            if(choose_mode == 0){
+                if(ch == 67 && mode < BLACKLIST_EXIT) mode++; //right
+                else if(ch == 68 && mode > BLACKLIST_SHOW) mode--; //left
+                else if(ch == 66 && mode != BLACKLIST_EXIT)  choose_mode = 1, choose = 0;//down
+            }else{
+                if(ch == 67) choose++;
+                else if(ch == 68) choose--;
+                else if(ch == 66) choose+=3;
+                else if(ch == 65) choose-=3;
+                if(choose >= blacklist_len) choose-=3;
+                else if(choose < 0) choose_mode = 0;
+            }
+        }
+        else if(ch == RETURN && choose_mode == 1){ //to delete from blacklist
+            int deletemode = 1;
+            Find_in_file(blacklist[choose_ind], file, deletemode, sockfd, user_info);
+        }
+        else if(ch == RETURN && mode == BLACKLIST_EXIT){
+            Flush_term();
+            break;
+        }
+    }
+
+    return 0;
+}
+
+
 int Cmd_friend(struct User *user_info, int sockfd){
     return 0;
 }
@@ -344,15 +492,12 @@ int Cmd_file(struct User *user_info, int sockfd){
     return 0;
 }
 
-int Cmd_blacklist(struct User *user_info, int sockfd){
-
-    return 0;
-}
 int Cmd_help(struct User *user_info, int sockfd){
-    printf(">users\n    start chatting!\n");
-    printf(">friend\n    add friend\n");
-    printf(">whoami\n    WHOAMI?\n");
-    printf(">file\n    file\n");
+    printf(">users\n");
+    printf(">friend\n");
+    printf(">whoami\n");
+    printf(">file\n");
+    printf(">blacklist\n");
     printf(">quit\n");
     return 0;
 }
