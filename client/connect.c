@@ -56,12 +56,14 @@ int Connect(struct connection *connect_info){
     info.sin_family = PF_INET;
     info.sin_addr.s_addr = inet_addr(connect_info->ip);
     info.sin_port = htons(connect_info->port);
-
-    int err = connect(sockfd,(struct sockaddr *)&info,sizeof(info));
-    if(err==-1){
-        printf("Connection error\n");
-        pthread_exit(NULL);    
+    for(int i=0;i<100;i++){
+        int err = connect(sockfd,(struct sockaddr *)&info,sizeof(info));
+        if(err!=-1){
+            //printf("Connection error\n");
+            return sockfd;
+        }
+        sleep(1);
     }
-    return sockfd;
+    return 0;
 
 }

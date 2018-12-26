@@ -354,6 +354,9 @@ int main(int argc, char **argv){
 		}
 		else if(retval != 0){
 			if(FD_ISSET(STDIN_FILENO,&working_readset)){
+	            for(int i=0;i<CONNECT_MAX;i++){
+                    if(user_data[i].status != DONGDONG_STATUS_DISCONNECT) close(i);
+                }
 				break;
 			}
 			for(int fd=3;fd<FD_SETSIZE;fd++){

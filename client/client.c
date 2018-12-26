@@ -359,15 +359,16 @@ int main(int argc, char *argv[]){
     struct connection connect_info;
     struct User user_info;
     parse_arg(argc, argv, &connect_info);
-    //signal(SIGPIPE, SIG_IGN);
-    int ret = 2, cnt = 0; 
-    int reconnect = 3;
-    while(1){ //reconnect
-        reconnect --;
-        pid_t pid;
-        pid = fork();
-        if(pid == 0){//child, close if receive SIGPIPE
+
+    while(1){
+        pid_t pid = fork();
+        if(pid == 0){
             int sockfd = Connect(&connect_info);
+            if(sockfd == 0){
+                printf("Connection error\n");
+                break;
+            }
+            int ret = 2, cnt = 0;
             while(ret == 2 || (ret == 0 && cnt != 3)){      //ret = 0(fail), 1(success), 2(register)
                 Flush_term();
                 cout << "\U0001F680 [32;1mPress ESC to register[0m" << endl;
@@ -379,35 +380,33 @@ int main(int argc, char *argv[]){
             }
             printf("\U0001F197 [1;32mLogin succeed[0m \U0001F197\n");
             sleep(1);
-        //    print_logo();
-            int sat = 1;
-            sat = Command_Interface(&user_info, sockfd); //quit command return 127 to sat
+            print_logo();
+    
+            Command_Interface(&user_info, sockfd);
             close(sockfd);
-            //printf("sat = %d\n", sat);
-            exit(sat);
-        }
-        else if(pid > 0){ //parent
-            int status;
-            waitpid(pid, &status, 0);
-            int returned = WEXITSTATUS(status);
-            if(returned == 127){ //child "quit"
-                return 0;
-            }
-            else{
-                Flush_term();
-                for(int sec = 3; sec>=0; sec--){
-                    Flush_line();
-                    fprintf(stdout, "Connection failed, auto-reconnect in %d seconds:\n", sec);
-                    sleep(1);      
-                }
-                printf("Reconnecting to server...\n");
-                sleep(1);                   
-            }
-        }
-        if(reconnect<0){
             break;
+        }else{
+            int detect_fd = Connect(&connect_info);
+            if(detect_fd == 0){
+                printf("Connection error\n");
+                break;
+            }
+            struct timeval time = {0, 100000};
+            while(1){
+                fd_set fds;
+                FD_ZERO(&fds);
+                FD_SET(detect_fd, &fds);
+                select(detect_fd+1, &fds, NULL, NULL, &time);
+                if(FD_ISSET(detect_fd,&fds)){
+                    kill(pid, SIGKILL);
+                    break;
+                }
+            }
         }
+        Flush_term();
+        printf("Reconnecting...\n");
+
     }
-    printf("\n\n\nSorry, please try again later... (._.)\n\n");
+
     return 0;
 }
