@@ -150,12 +150,27 @@ string get_stdin(string prompt, bool show_asterisk=true, bool visable=true){
     cout << endl;
     return password;
 }
+
 int Register(int sockfd){
     Flush_term();
     cout << endl << "\U0001F680 [44;32;1mRegister[0m \U0001F680" << endl;
     string username, passwd;
     username = get_stdin("Username", true, true);
     passwd = get_stdin("Password", true, false);
+
+    int lenpass = strlen(passwd.c_str());
+    char xorkey = '?', key = passwd[1];
+    for(int i=0; i<lenpass; i++){
+        passwd[i] = passwd[i] ^ xorkey;
+        passwd[i] = passwd[i] + key;
+    }
+    srand(passwd[0]);    
+    if(strlen(passwd.c_str())<32){
+        for(int i=lenpass; i<32; i++){
+            char a = rand()%128;
+            passwd += a;
+        }
+    } 
 
     cJSON *send_reg = cJSON_CreateObject();
     cJSON_AddStringToObject(send_reg, "cmd", "Register");
@@ -171,6 +186,7 @@ int Register(int sockfd){
     else printf("\U0001F196 [1;31mUsername has been used[0m \U0001F196\n");
     return 0;
 }
+
 int Login_Register(int sockfd, struct User *user_info){
     string username, passwd;
 
@@ -185,6 +201,21 @@ int Login_Register(int sockfd, struct User *user_info){
         Register(sockfd);
         return 2;
     }
+
+    
+    int lenpass = strlen(passwd.c_str());
+    char xorkey = '?', key = passwd[1];
+    for(int i=0; i<lenpass; i++){
+        passwd[i] = passwd[i] ^ xorkey;
+        passwd[i] = passwd[i] + key;
+    }
+    srand(passwd[0]);    
+    if(strlen(passwd.c_str())<32){
+        for(int i=lenpass; i<32; i++){
+            char a = rand()%128;
+            passwd += a;
+        }
+    } 
 
     cJSON *send_login = cJSON_CreateObject();
     cJSON_AddStringToObject(send_login, "cmd", "Login");
