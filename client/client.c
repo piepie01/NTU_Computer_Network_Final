@@ -14,6 +14,8 @@
 #include "json_include/cJSON/cJSON.h"
 #include <signal.h>
 #include <sys/wait.h>
+#include <sys/stat.h>
+#include <sys/ioctl.h>
 
 #include <termios.h>
 #include <unistd.h>
@@ -24,6 +26,7 @@
 #include "connect.h"
 #include "command.h"
 using namespace std;
+struct winsize w1;
 /*
 void Flush_term(){
     printf("\033[%d;%dH", 0, 0);
@@ -73,8 +76,171 @@ void print_logo(){
     return;
 }
 
+int flash(char filename[]){
+    srand(time(NULL));
+    int color[7] = {31, 32, 33, 34, 35, 36, 37};
+    FILE *f = fopen(filename, "r");
+    char pic[4000] = "\0";
+    int pic_len = fread(pic, 1, sizeof(pic), f);
+    FILE *f1 = fopen("meow", "r");
+    char pic1[4000] = "\0";
+    int pic1_len = fread(pic1, 1, sizeof(pic1), f1);
+    int wid = 0, hei = 0;
+    int tmp_wid = 0;
+    for(int i=0;i<pic_len;i++){
+        tmp_wid++;
+        if(pic[i] == '\n'){
+            hei++;
+            wid = (tmp_wid > wid)?tmp_wid:wid;
+            tmp_wid = 0;
+        }
+    }
+    int wid1 = 0, hei1 = 0;
+    int tmp_wid1 = 0;
+    for(int i=0;i<pic1_len;i++){
+        tmp_wid1++;
+        if(pic1[i] == '\n'){
+            hei1++;
+            wid1 = (tmp_wid1 > wid1)?tmp_wid1:wid1;
+            tmp_wid1 = 0;
+        }
+    }
+    wid = 18;
+    wid1 = 18;
+    int lt[2] = {0,0}, ld[2] = {hei, 0}, rt[2] = {0, wid}, rd[2] = {hei, wid}, d[2] = {1, 1};
+    int lt1[2] = {20,50}, ld1[2] = {20+hei1, 50}, rt1[2] = {20, wid1+50}, rd1[2] = {20+hei1, wid1+50}, d1[2] = {1, -1};
+    int color_ind = rand()%7;
+    while(1){
+        if(kbhit()){
+            getch();
+            Flush_term();
+            break;
+        }
+        lt[0]+=d[0], lt[1]+=d[1];
+        ld[0]+=d[0], ld[1]+=d[1];
+        rt[0]+=d[0], rt[1]+=d[1];
+        rd[0]+=d[0], rd[1]+=d[1];
+        lt1[0]+=d1[0], lt1[1]+=d1[1];
+        ld1[0]+=d1[0], ld1[1]+=d1[1];
+        rt1[0]+=d1[0], rt1[1]+=d1[1];
+        rd1[0]+=d1[0], rd1[1]+=d1[1];
+        Flush_term();
+
+        if(lt[1] > lt1[1]){
+        for(int i=0;i<=lt[0];i++) printf("\n");
+        for(int i=0;i<=lt[1];i++) printf(" ");
+
+        printf("[%dm", color[color_ind]);
+        for(int i=0;i<pic_len;i++){
+            if(pic[i] == '\n'){
+                printf("\n");
+                for(int j=0;j<=lt[1];j++) printf(" ");
+            }else printf("%c", pic[i]);
+
+        }
+        printf("[0m");
+
+        printf("\033[%d;%dH", 0, 0);
+
+        printf("\033[%d;%dH", 0, 0);
+        for(int i=0;i<=lt1[0];i++) printf("\n");
+        for(int i=0;i<=lt1[1];i++) printf(" ");
+        printf("[%dm", color[color_ind]);
+        for(int i=0;i<pic1_len;i++){
+            if(pic1[i] == '\n'){
+                    printf("\n");
+                for(int j=0;j<=lt1[1];j++) printf(" ");
+            }else printf("%c", pic1[i]);
+
+        }
+        printf("[0m");
+        }
+        else{
+
+        for(int i=0;i<=lt1[0];i++) printf("\n");
+        for(int i=0;i<=lt1[1];i++) printf(" ");
+        printf("[%dm", color[color_ind]);
+        for(int i=0;i<pic1_len;i++){
+            if(pic1[i] == '\n'){
+                    printf("\n");
+                for(int j=0;j<=lt1[1];j++) printf(" ");
+            }else printf("%c", pic1[i]);
+
+        }
+        printf("[0m");
+        printf("\033[%d;%dH", 0, 0);
+
+        for(int i=0;i<=lt[0];i++) printf("\n");
+        for(int i=0;i<=lt[1];i++) printf(" ");
+
+        printf("[%dm", color[color_ind]);
+        for(int i=0;i<pic_len;i++){
+            if(pic[i] == '\n'){
+                printf("\n");
+                for(int j=0;j<=lt[1];j++) printf(" ");
+            }else printf("%c", pic[i]);
+
+        }
+        printf("[0m");
+        }
+
+        printf("\033[%d;%dH", 2, 0);
+        printf("[%dm", color[color_ind]);
+        for(int i=0;i<w1.ws_col;i++) printf("█");
+        printf("[0m");
+
+        printf("\033[%d;%dH", w1.ws_row-2, 0);
+        printf("[%dm", color[color_ind]);
+        for(int i=0;i<w1.ws_col;i++) printf("█");
+        printf("[0m");
+
+
+        printf("\033[%d;%dH", w1.ws_row-1, 0);
+        printf("[%dm", color[color_ind]);
+        for(int i=0;i<w1.ws_col;i++) printf("█");
+        printf("[0m");
+        printf("\033[%d;%dH", 0, 0);
+        usleep((int)3e+5);
+
+        if(rt[1] == w1.ws_col){
+            d[1] = -1;
+            color_ind = rand()%7;
+        }
+        if(lt[1] == 0){
+            d[1] = 1;
+            color_ind = rand()%7;
+        }
+        if(rt[0] == 0){
+            d[0] = 1;
+            color_ind = rand()%7;
+        }
+        if(ld[0] == w1.ws_row-4){
+            d[0] = -1;
+            color_ind = rand()%7;
+        }
+
+        if(rt1[1] == w1.ws_col){
+            d1[1] = -1;
+            color_ind = rand()%7;
+        }
+        if(lt1[1] == 0){
+            d1[1] = 1;
+            color_ind = rand()%7;
+        }
+        if(rt1[0] == 0){
+            d1[0] = 1;
+            color_ind = rand()%7;
+        }
+        if(ld1[0] == w1.ws_row-4){
+            d1[0] = -1;
+            color_ind = rand()%7;
+        }
+    }
+    return 0;
+}
 
 void parse_arg(int argc, char *argv[], struct connection *connect_info){
+    ioctl(STDOUT_FILENO, TIOCGWINSZ, &w1);
     if(argc != 2){
         printf("./client ip:port\n");
         return;
@@ -226,7 +392,9 @@ int Search_Command(char command[], int *command_ind, char Commands[][20], int Co
     
 }
 int Get_Command(char command[], struct User *user_info, char Commands[][20], int Commands_num, char History[][20], int History_ind){
+    enable_raw_mode();
     printf("%s> ", user_info->username);
+    fflush(stdout);
     const char BACKSPACE=127;
     const char TAB=9;
     const char RETURN=10;
@@ -238,8 +406,22 @@ int Get_Command(char command[], struct User *user_info, char Commands[][20], int
     int now_history = History_ind;
     char space[50] = "\0";
     memset(space, ' ', sizeof(space)-1);
-    while((ch=getch())!=RETURN){
+    char protect[20] = "reconnect.txt\0";
+    clock_t start = clock();
+    while(1){
         //cout << (int)ch << endl;
+        if((float)(clock() - start)/CLOCKS_PER_SEC > 5.0){
+            flash(protect);
+            start = clock();
+            printf("\r%s\r%s> %s", space, user_info->username, command);
+        }
+        if(!kbhit()){
+            fflush(stdout);
+            continue;
+        }
+        start = clock();
+        ch=getch();
+        if(ch == RETURN) break;
         if(ch == TAB) tab_num++;
         else if(ch == BACKSPACE){
             tab_num = 0;
@@ -276,11 +458,13 @@ int Get_Command(char command[], struct User *user_info, char Commands[][20], int
             }
         }
         else{
-            for(int i=20-2;i>=command_ind;i--) command[i+1] = command[i];
-            command[command_ind++] = ch;
-            tab_num = 0;
-            printf("%s",&command[command_ind-1]);
-            for(int i=command_ind;i<(int)strlen(command);i++) printf("\b");
+            if((int)strlen(command) <= 19){
+                for(int i=20-2;i>=command_ind;i--) command[i+1] = command[i];
+                command[command_ind++] = ch;
+                tab_num = 0;
+                printf("%s",&command[command_ind-1]);
+                for(int i=command_ind;i<(int)strlen(command);i++) printf("\b");
+            }
         }
         if(tab_num == 1){
             if(Search_Command(command, &command_ind, Commands, Commands_num, 0) == 1) tab_num--; 
@@ -292,6 +476,7 @@ int Get_Command(char command[], struct User *user_info, char Commands[][20], int
         }
     }
     printf("\n");
+    disable_raw_mode();
     return 0;
 }
 int Parse_Commands(char Commands[][20]){
@@ -316,7 +501,7 @@ int Parse_func(int (*Commands_func[])(struct User*, int)){
     Commands_func[0] = Cmd_quit;
     Commands_func[1] = Cmd_users;
     Commands_func[2] = Cmd_friend;
-    Commands_func[3] = Cmd_whoami;
+    Commands_func[3] = Cmd_group;
     Commands_func[4] = Cmd_file;
     Commands_func[5] = Cmd_help;    
     Commands_func[6] = Cmd_blacklist;
@@ -392,11 +577,15 @@ int main(int argc, char *argv[]){
                 break;
             }
             struct timeval time = {0, 100000};
+            int status;
+            pid_t ret_pid;
             while(1){
                 fd_set fds;
                 FD_ZERO(&fds);
                 FD_SET(detect_fd, &fds);
                 select(detect_fd+1, &fds, NULL, NULL, &time);
+                ret_pid = waitpid(pid, &status, WNOHANG);
+                if(ret_pid == pid) return 0;
                 if(FD_ISSET(detect_fd,&fds)){
                     kill(pid, SIGKILL);
                     break;

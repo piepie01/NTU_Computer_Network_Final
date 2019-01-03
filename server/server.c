@@ -20,6 +20,11 @@
 struct fd_connection user_data[CONNECT_MAX];
 char user_buf[CONNECT_MAX][JSON_LEN];
 int user_buf_index[CONNECT_MAX];
+char user_file[CONNECT_MAX][CONNECT_MAX][100000];
+int user_file_ind[CONNECT_MAX];
+int friend_matrix[CONNECT_MAX][CONNECT_MAX], name_len;
+char names[CONNECT_MAX][40];
+struct Group groups[CONNECT_MAX];
 
 void printline(){
 	printf("-----------------------------\n");
@@ -52,12 +57,39 @@ void buf_init(){
 	for(int i=0;i<CONNECT_MAX;i++) user_buf_index[i] = 0;
 	memset(user_buf,0,sizeof(user_buf));
 	memset(user_data,0,sizeof(user_data));
+    memset(groups, 0, sizeof(groups));
+	memset(names,0,sizeof(names));
+	memset(friend_matrix,0,sizeof(friend_matrix));
+    name_len = 0;
 	for(int i=0;i<CONNECT_MAX;i++) user_data[i].status = DONGDONG_STATUS_DISCONNECT;
+	for(int i=0;i<CONNECT_MAX;i++) user_file_ind[i] = 0;
     
     char user_dir[6] = "User\0";
     if(access(user_dir, F_OK) != 0) mkdir(user_dir, 0755);
     char messages_dir[10] = "Messages\0";
     if(access(messages_dir, F_OK) != 0) mkdir(messages_dir, 0755);
+
+
+    FILE *pFile;
+    pFile = fopen( "User/account.json","r" );
+    if(pFile == NULL) return;
+    char buf[4096] = {0};
+    fread(buf, 4095, 1, pFile);
+    fclose(pFile);
+
+    int start = 0, len = strlen(buf);
+    char tmp[4096] = {0};
+    for(int i = 0;i<len;i++){
+        tmp[i-start] = buf[i];
+        if(buf[i] == '}'){
+            cJSON *root = cJSON_Parse(tmp);
+            memset(tmp, 0, 4096);
+            start = i+1;
+            cJSON *user = cJSON_GetObjectItemCaseSensitive(root, "username");
+            strcpy(names[name_len++], user->valuestring);
+        }
+    }
+    
 	return;
 }
 
@@ -80,12 +112,17 @@ int sock_init(char port[]){
 	assert(!retval);
 	return sockfd;
 }
+int find_name_ind(char *r){
+    for(int i=0;i<name_len;i++) if(strcmp(names[i], r) == 0) return i;
+    return -1;
+}
 cJSON* GET_JSON(int fd){
 	cJSON *root = NULL;
 	char tmp[6000];
 	char copy[6000];
 	memset(tmp,0,sizeof(tmp));
 	memset(copy,0,sizeof(tmp));
+    printf("%s\n", user_buf[fd]);
 	for(int i=0;i<user_buf_index[fd];i++){
 		if(user_buf[fd][i] == '\n'){
 			strncpy(tmp,user_buf[fd],i);
@@ -168,11 +205,27 @@ cJSON* Get_users_list(int mode, int fd){
     fread(buf, 4095, 1, pFile);
     fclose(pFile);
 
+    char friend_file[20] = "User/\0";
+    strcat(friend_file, user_data[fd].user.name);
+    pFile = fopen(friend_file, "r");
+    if(pFile == NULL){
+        pFile = fopen(friend_file, "w");
+        fclose(pFile);
+        pFile = fopen(friend_file, "r");
+    }
+    char buf2[4096] = {0};
+    fread(buf2, 4095, 1, pFile);
+    fclose(pFile);
+    int buf2_len = strlen(buf2);
+    printf("buf2 : %s\n", buf2);
+
     int start = 0, len = strlen(buf);
     char tmp[4096] = {0};
     char tmp_users[CONNECT_MAX][64];
     int tmp_status[CONNECT_MAX] = {0}, tmp_len = 0;
     memset(tmp_users, 0, sizeof(tmp_users));
+    int f_status[CONNECT_MAX] = {0}, f_len = 0;
+    int req_status[CONNECT_MAX] = {0}, req_len = 0;
     for(int i = 0;i<len;i++){
         tmp[i-start] = buf[i];
         if(buf[i] == '}'){
@@ -190,6 +243,19 @@ cJSON* Get_users_list(int mode, int fd){
                 else if(j == CONNECT_MAX - 1)
                     strcpy(tmp_users[tmp_len++], user->valuestring);
             }
+            int start = 0;
+            for(int j=0;j<buf2_len;j++){
+                if(buf2[j] == '\n'){
+                    buf2[j] = '\0';
+                    if(strcmp(&buf2[start], user->valuestring) == 0) f_status[f_len] = 1;
+                    buf2[j] = '\n';
+                    start = j+1;
+                }
+            }
+            f_len++;
+
+            int ind2 = find_name_ind(user_data[fd].user.name), ind1 = find_name_ind(user->valuestring);
+            req_status[req_len++] = friend_matrix[ind1][ind2];
         }
     }
 	cJSON *ret = cJSON_CreateObject();
@@ -199,7 +265,26 @@ cJSON* Get_users_list(int mode, int fd){
         cJSON *obj = cJSON_CreateObject();
         cJSON_AddStringToObject(obj, "username", tmp_users[i]);
         cJSON_AddNumberToObject(obj, "online", tmp_status[i]);
+        cJSON_AddNumberToObject(obj, "friend", f_status[i]);
+        cJSON_AddNumberToObject(obj, "req", req_status[i]);
         cJSON_AddItemToArray(arr, obj);
+    }
+    cJSON_AddItemToObject(ret, "data", arr);
+	printf("%s\n",cJSON_Print(ret));
+    
+	return ret;
+}
+cJSON* Get_groups_list(int mode, int fd){
+	cJSON *ret = cJSON_CreateObject();
+    cJSON_AddStringToObject(ret, "cmd", "Get_group");
+    cJSON *arr = cJSON_CreateArray();
+    for(int i=0;i<CONNECT_MAX;i++){
+        if(groups[i].status == 1){
+            cJSON *obj = cJSON_CreateObject();
+            cJSON_AddStringToObject(obj, "name", groups[i].name);
+            cJSON_AddStringToObject(obj, "owner", groups[i].owner);
+            cJSON_AddItemToArray(arr, obj);
+        }
     }
     cJSON_AddItemToObject(ret, "data", arr);
 	printf("%s\n",cJSON_Print(ret));
@@ -287,6 +372,115 @@ int handle_online(int fd, cJSON *root){
         return DONGDONG_STATUS_CHATROOM;
         
     }
+    if(strcmp("file\0", cmd->valuestring) == 0){
+	    cJSON *you = cJSON_GetObjectItemCaseSensitive(root, "you");
+        for(int i=0;i<CONNECT_MAX;i++){
+            if(strcmp(you->valuestring, user_data[i].user.name) == 0){
+                char *tmp = cJSON_PrintUnformatted(root);
+                strcpy(user_file[i][user_file_ind[i]++], tmp);
+                printf("match %s\n", user_data[i].user.name);
+                break;
+            }
+        }
+        return DONGDONG_STATUS_ONLINE;
+    }
+    if(strcmp("check_file\0", cmd->valuestring) == 0){
+	    cJSON *me = cJSON_GetObjectItemCaseSensitive(root, "me");
+        for(int i=0;i<CONNECT_MAX;i++){
+            if(strcmp(me->valuestring, user_data[i].user.name) == 0){
+                printf("There are %d\n", user_file_ind[i]);
+                send(fd, &user_file_ind[i], sizeof(int), 0);
+                break;
+            }
+        }
+        return DONGDONG_STATUS_ONLINE;
+    }
+    if(strcmp("get_file\0", cmd->valuestring) == 0){
+	    cJSON *me = cJSON_GetObjectItemCaseSensitive(root, "me");
+        for(int i=0;i<CONNECT_MAX;i++){
+            if(strcmp(me->valuestring, user_data[i].user.name) == 0){
+                for(int j=0;j<user_file_ind[i];j++){
+                    printf("send %s\n", user_file[i][j]);
+                    send(fd, user_file[i][j], strlen(user_file[i][j]), 0);
+                    send(fd, "\n", 1, 0);
+                    memset(user_file[i][j], 0, sizeof(user_file[i][j]));
+                }
+                user_file_ind[i] = 0;
+                break;
+            }
+        }
+        return DONGDONG_STATUS_ONLINE;
+    }
+    if(strcmp("Friend_request\0", cmd->valuestring) == 0){
+	    cJSON *me = cJSON_GetObjectItemCaseSensitive(root, "me");
+	    cJSON *you = cJSON_GetObjectItemCaseSensitive(root, "you");
+        int ind1 = find_name_ind(me->valuestring), ind2 = find_name_ind(you->valuestring);
+        printf("%s:%d %s:%d\n", me->valuestring, ind1, you->valuestring, ind2);
+        friend_matrix[ind1][ind2] = 1;
+        return DONGDONG_STATUS_ONLINE;
+        
+    }
+    if(strcmp("Friend_accept\0", cmd->valuestring) == 0){
+	    cJSON *me = cJSON_GetObjectItemCaseSensitive(root, "me");
+	    cJSON *you = cJSON_GetObjectItemCaseSensitive(root, "you");
+        char filename[30] = "User/\0";
+        strcat(filename, me->valuestring);
+        FILE *f = fopen(filename, "a");
+        fwrite(you->valuestring, 1, strlen(you->valuestring), f);
+        fwrite("\n", 1, 1, f);
+        fclose(f);
+        char filename1[30] = "User/\0";
+        strcat(filename1, you->valuestring);
+        f = fopen(filename1, "a");
+        fwrite(me->valuestring, 1, strlen(me->valuestring), f);
+        fwrite("\n", 1, 1, f);
+        fclose(f);
+        return DONGDONG_STATUS_ONLINE;
+        
+    }
+    if(strcmp("Group_make\0", cmd->valuestring) == 0){
+	    cJSON *me = cJSON_GetObjectItemCaseSensitive(root, "me");
+	    cJSON *name = cJSON_GetObjectItemCaseSensitive(root, "name");
+        for(int i=0;i<CONNECT_MAX;i++){
+            if(groups[i].status == 0){
+                strcpy(groups[i].name, name->valuestring);
+                strcpy(groups[i].owner, me->valuestring);
+                groups[i].status = 1;
+                break;
+            }
+        }
+        return DONGDONG_STATUS_ONLINE;
+    }
+    if(strcmp("Get_group\0", cmd->valuestring) == 0){
+        cJSON *root = Get_groups_list(0, fd);
+        char *send_root  = cJSON_PrintUnformatted(root);
+        send(fd, send_root, strlen(send_root), 0);
+        cJSON_Delete(root);
+        return DONGDONG_STATUS_ONLINE;
+        
+    }
+    if(strcmp("Grouproom\0", cmd->valuestring) == 0){
+	    cJSON *me = cJSON_GetObjectItemCaseSensitive(root, "me");
+	    cJSON *name = cJSON_GetObjectItemCaseSensitive(root, "name");
+        for(int i=0;i<CONNECT_MAX;i++){
+            if(strcmp(groups[i].name, name->valuestring) == 0){
+	            cJSON *ret = cJSON_CreateObject();
+                cJSON_AddStringToObject(ret, "me", me->valuestring);
+                cJSON_AddStringToObject(ret, "message", "enter");
+                char *send_root  = cJSON_PrintUnformatted(ret);
+                printf("%s\n", send_root);
+                for(int j=0;j<CONNECT_MAX;j++){
+                    if(groups[i].fds[j] == 1) send(j, send_root, strlen(send_root), 0);
+                }
+                cJSON_Delete(ret);
+                groups[i].fds[fd] = 1;
+                break;
+            }
+        }
+        
+        return DONGDONG_STATUS_GROUPROOM;
+        
+    }
     return DONGDONG_STATUS_ONLINE;
 }
 int handle_chatroom(int fd, cJSON *root){
@@ -309,6 +503,45 @@ int handle_chatroom(int fd, cJSON *root){
     }
     return DONGDONG_STATUS_CHATROOM;
 }
+int handle_grouproom(int fd, cJSON *root){
+	cJSON *cmd = cJSON_GetObjectItemCaseSensitive(root, "cmd");
+    if(strcmp("Chat\0", cmd->valuestring) == 0){
+        printf("In Chat\n");
+	    cJSON *name = cJSON_GetObjectItemCaseSensitive(root, "name");
+        for(int i=0;i<CONNECT_MAX;i++){
+            if(strcmp(groups[i].name, name->valuestring) == 0){
+                char *send_root  = cJSON_PrintUnformatted(root);
+                printf("%s\n", send_root);
+                for(int j=0;j<CONNECT_MAX;j++){
+                    if(groups[i].fds[j] == 1) send(j, send_root, strlen(send_root), 0);
+                }
+                break;
+            }
+        }
+        return DONGDONG_STATUS_GROUPROOM;
+    }
+    if(strcmp("Quit\0", cmd->valuestring) == 0){
+	    cJSON *name = cJSON_GetObjectItemCaseSensitive(root, "name");
+	    cJSON *me = cJSON_GetObjectItemCaseSensitive(root, "me");
+        for(int i=0;i<CONNECT_MAX;i++){
+            if(strcmp(groups[i].name, name->valuestring) == 0){
+                groups[i].fds[fd] = 0;
+	            cJSON *ret = cJSON_CreateObject();
+                cJSON_AddStringToObject(ret, "me", me->valuestring);
+                cJSON_AddStringToObject(ret, "message", "quit");
+                char *send_root  = cJSON_PrintUnformatted(ret);
+                printf("%s\n", send_root);
+                for(int j=0;j<CONNECT_MAX;j++){
+                    if(groups[i].fds[j] == 1) send(j, send_root, strlen(send_root), 0);
+                }
+                cJSON_Delete(ret);
+                break;
+            }
+        }
+        return DONGDONG_STATUS_ONLINE;
+    }
+    return DONGDONG_STATUS_GROUPROOM;
+}
 int handle_command(int fd,cJSON *root){
 	//cJSON *cmd = cJSON_GetObjectItemCaseSensitive(root, "cmd");
 	printline();
@@ -322,6 +555,9 @@ int handle_command(int fd,cJSON *root){
     }
     else if(user_data[fd].status == DONGDONG_STATUS_CHATROOM){
         user_data[fd].status = handle_chatroom(fd, root);
+    }
+    else if(user_data[fd].status == DONGDONG_STATUS_GROUPROOM){
+        user_data[fd].status = handle_grouproom(fd, root);
     }
 	return 0;
 }
@@ -373,11 +609,13 @@ int main(int argc, char **argv){
 
 					if(sz == 0) fd_quit(fd,&readset);
 					else{
-						cJSON *root = GET_JSON(fd);
-						if(root != NULL){
-							handle_command(fd, root);
-                            cJSON_Delete(root);
-						}
+                        while(1){
+						    cJSON *root = GET_JSON(fd);
+						    if(root != NULL){
+							    handle_command(fd, root);
+                                cJSON_Delete(root);
+						    }else break;
+                        }
 					}
 				}
 			}
