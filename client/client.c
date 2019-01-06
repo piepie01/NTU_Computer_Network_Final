@@ -27,6 +27,8 @@
 #include "command.h"
 using namespace std;
 struct winsize w1;
+pthread_t t_send, t_receive;
+int fd_send, fd_receive;
 /*
 void Flush_term(){
     printf("\033[%d;%dH", 0, 0);
@@ -242,7 +244,7 @@ int flash(char filename[]){
 void parse_arg(int argc, char *argv[], struct connection *connect_info){
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w1);
     if(argc != 2){
-        printf("./client ip:port\n");
+        //printf("./client ip:port\n");
         return;
     }
 
@@ -353,7 +355,7 @@ int Register(int sockfd){
     return 0;
 }
 
-int Login_Register(int sockfd, struct User *user_info){
+int Login_Register(int sockfd, struct User *user_info, struct connection *connect_info){
     string username, passwd;
 
     username = get_stdin("Username", true, true);
@@ -396,6 +398,23 @@ int Login_Register(int sockfd, struct User *user_info){
     if(ret == '1'){
         strcpy(user_info->username, username.c_str());
         strcpy(user_info->passwd, passwd.c_str());
+        fd_send = Connect(connect_info);
+        cJSON *send_login2 = cJSON_CreateObject();
+        cJSON_AddStringToObject(send_login2, "cmd", "Login2");
+        cJSON_AddStringToObject(send_login2, "username", username.c_str());
+        char *send_login2_json  = cJSON_PrintUnformatted(send_login2);
+        send(fd_send, send_login2_json, strlen(send_login2_json), 0);
+        send(fd_send,"\n",1,0);
+        pthread_create(&t_send, NULL, File_send, (void*) &fd_send);
+
+        fd_receive = Connect(connect_info);
+        cJSON *send_login3 = cJSON_CreateObject();
+        cJSON_AddStringToObject(send_login3, "cmd", "Login3");
+        cJSON_AddStringToObject(send_login3, "username", username.c_str());
+        char *send_login3_json  = cJSON_PrintUnformatted(send_login3);
+        send(fd_receive, send_login3_json, strlen(send_login3_json), 0);
+        send(fd_receive,"\n",1,0);
+        pthread_create(&t_receive, NULL, File_receive, (void*) &fd_receive);
         return 1;
     }
     else return 0;
@@ -591,7 +610,7 @@ int main(int argc, char *argv[]){
                 if(cnt != 0) printf("\U0001F6AB [1;31mWrong Username or Passwd, remain [0m[1;35m%d[0m [1;31mtimes[0m\n", 3-cnt);
 
                 cout << endl << "\U0001F340 [47;34;1mLogin[0m \U0001F340" << endl;
-                ret = Login_Register(sockfd, &user_info);
+                ret = Login_Register(sockfd, &user_info, &connect_info);
                 if(ret == 0) cnt++;
             }
             printf("\U0001F197 [1;32mLogin succeed[0m \U0001F197\n");

@@ -18,10 +18,16 @@
 #include <sys/time.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <pthread.h>
 struct winsize w;
 char space[10000];
+struct File_obj file_obj[1000];
+int file_obj_ind;
+pthread_mutex_t mutex1 = PTHREAD_MUTEX_INITIALIZER;
 void Command_var_init(){
     memset(space, ' ', sizeof(space)-1);
+    memset(file_obj, 0, sizeof(file_obj));
+    file_obj_ind = 0;
     space[10000-1] = '\0';
     ioctl(STDOUT_FILENO, TIOCGWINSZ, &w);
     char file_dir[8] = "files\0";
@@ -964,52 +970,91 @@ int Print_files(char filenames[][100], int file_num){
     printf("\n");
     return 0;
 }
-int Send_file(struct User *user_info, int sockfd, char filename[], char target[]){
-    char name[100] = {0};
-    int filename_len = strlen(filename), ind = 0;
-    for(int i=filename_len-1;i>=0;i--){
-        if(filename[i] == '/'){
-            ind = i+1;
-            break;
+void* File_send(void *arg){
+    int *fd = (int *)arg;
+    int ind = 0;
+    struct File_obj tmp_obj;
+    memset(&tmp_obj, 0, sizeof(tmp_obj));
+    while(1){
+        pthread_mutex_lock( &mutex1 );
+        if(file_obj[ind].status == 1){
+            memcpy(&tmp_obj, &file_obj[ind], sizeof(tmp_obj));
+            memset(&file_obj[ind], 0, sizeof(tmp_obj));
+            ind = (ind+1) % 1000;
         }
+        pthread_mutex_unlock( &mutex1 );
+        if(tmp_obj.status == 1){
+            //printf("handle %s\n", tmp_obj.filename);
+            FILE *f = fopen(tmp_obj.filename, "r");
+            char buf[1001] = "\0";
+            while(!feof(f)){
+                cJSON *send_file = cJSON_CreateObject();
+                cJSON_AddStringToObject(send_file, "cmd", "file");
+                cJSON_AddStringToObject(send_file, "me", tmp_obj.from);
+                cJSON_AddStringToObject(send_file, "you", tmp_obj.target);
+                cJSON_AddStringToObject(send_file, "filename", tmp_obj.filename);
+                int res = fread(buf, 1, 1000, f);
+                buf[res] = 0;
+                cJSON_AddStringToObject(send_file, "content", buf);
+                char *send_file_json  = cJSON_PrintUnformatted(send_file);
+                send(*fd, send_file_json, strlen(send_file_json), 0);
+                send(*fd,"\n",1,0);
+                cJSON_Delete(send_file);
+                //sleep(1);
+
+            }
+            fclose(f);
+            memset(&tmp_obj, 0, sizeof(tmp_obj));
+        }
+
     }
-    strcpy(name, &filename[ind]);
-    FILE *f;
-    int ret = 0, len = 0;
-    f = fopen(filename, "r");
-    char buf[(int)1e+5] = {0};
-    while((ret = fread(&buf[len], 1, sizeof(buf), f)) > 0) len+=ret;
-    cJSON *send_file = cJSON_CreateObject();
-    cJSON_AddStringToObject(send_file, "cmd", "file");
-    cJSON_AddStringToObject(send_file, "me", user_info->username);
-    cJSON_AddStringToObject(send_file, "you", target);
-    cJSON_AddStringToObject(send_file, "filename", name);
-    cJSON_AddStringToObject(send_file, "content", buf);
-    char *send_file_json  = cJSON_PrintUnformatted(send_file);
-    send(sockfd, send_file_json, strlen(send_file_json), 0);
-    send(sockfd,"\n",1,0);
-    return 0;
+    pthread_exit(NULL);
 }
-int Save_files(char buf[]){
-    int len = strlen(buf);
-    char tmp_buf[10000] = {0};
-    int tmp_buf_ind = 0;
-    for(int i=0;i<len;i++){
-        tmp_buf[tmp_buf_ind++] = buf[i];
-        if(buf[i] == '\n'){
-            cJSON *root = cJSON_Parse(tmp_buf);
+void* File_receive(void *arg){
+    int *fd = (int *)arg;
+    char ret[40960] = "\0";
+    int ind = 0;
+    while(1){
+        if(server_message(*fd)){
+            int sz = recv(*fd, &ret[ind], 4096, 0);
+            ind+=sz;
+            
+            while(1){
+            cJSON *root = NULL;
+            char tmp[4096] = {0};
+            char copy[4096] = {0};
+            for(int i=0;i<ind;i++){
+                if(ret[i] == '\n'){
+                    strncpy(tmp,ret,i);
+                    strcpy(copy, &ret[i+1]);
+                    memset(ret, 0, sizeof(ret));
+                    strcpy(ret, copy);
+                    ind = strlen(ret);
+                    root = cJSON_Parse(tmp);
+                    break;
+                }
+            }
+            if(root == NULL) break;
+            //printf("%s\n", cJSON_PrintUnformatted(root));
             cJSON *filename = cJSON_GetObjectItemCaseSensitive(root, "filename");
             cJSON *content = cJSON_GetObjectItemCaseSensitive(root, "content");
-            char path[100] = "files/\0";
-            strcat(path, filename->valuestring);
-            FILE *f = fopen(path, "w");
-            fwrite(content->valuestring, 1, strlen(content->valuestring), f);
-            fclose(f);
-            memset(tmp_buf, 0, sizeof(tmp_buf));
-            tmp_buf_ind = 0;
+            char store[64] = "files/\0";
+            int len = strlen(filename->valuestring);
+            for(int i=len-1;i>=0;i--){
+                if(filename->valuestring[i] == '/'){
+                    strcat(store, &filename->valuestring[i+1]);
+                    break;
+                }
+            }
+            //printf("%s\n", store);
+            FILE *new_f = fopen(store, "a");
+            fwrite(content->valuestring, 1, strlen(content->valuestring), new_f);
+            fclose(new_f);
+            cJSON_Delete(root);
+            }
         }
     }
-    return 0;
+    pthread_exit(NULL);
 }
 int listdir(char path[]){
     DIR *dp;
@@ -1092,13 +1137,33 @@ int Cmd_file(struct User *user_info, int sockfd){
                 else if(i == 4){ // users
                     int users_len = Parse_friend(users, status, friends, requests, sockfd);
                     for(int j=0;j<users_len;j++){
-                        if(friends[j] == 1)
+                        if(friends[j] == 1 && status[j] == 1)
                             printf("[5;7;1;44;36m%s[0m\n", users[j]);
-                        else
+                        else if(status[j] == 1)
                             printf("%s\n", users[j]);
                     }
                 }
                 else if(i == 5){ // send
+                    if(command[strlen(Commands[i])] != ' ') printf("Specify a user\n");
+                    int users_len = Parse_friend(users, status, friends, requests, sockfd);
+                    for(int j=0;j<users_len;j++){
+                        if(strcmp(users[j], &command[strlen(Commands[i])+1]) == 0 && status[j] == 1){
+                            pthread_mutex_lock( &mutex1 );
+                            for(int k=0;k<file_num;k++){
+                                strcpy(file_obj[file_obj_ind].filename, filenames[k]);
+                                strcpy(file_obj[file_obj_ind].target, users[j]);
+                                strcpy(file_obj[file_obj_ind].from, user_info->username);
+                                file_obj[file_obj_ind].status = 1;
+                                file_obj_ind = ( file_obj_ind + 1 ) %1000;
+                            }
+                            pthread_mutex_unlock( &mutex1 );
+                            memset(filenames, 0, sizeof(filenames));
+                            file_num = 0;
+
+                            break;
+                        }
+                        else if(j == users_len - 1) printf("users:%s not found or offline, try command:>users\n");
+                    }
                 
                 }
                 else if(i == 6){ // quit

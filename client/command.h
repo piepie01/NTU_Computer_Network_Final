@@ -15,6 +15,12 @@ typedef enum{
 	GROUP_MAKE = 7127,
 	GROUP_EXIT = 7128,
 } group_status;
+struct File_obj{
+    char filename[400];
+    char target[64];
+    char from[64];
+    int status;
+};
 void Command_var_init();
 void Flush_term();
 void Flush_line();
@@ -22,6 +28,8 @@ void enable_raw_mode();
 void disable_raw_mode();
 int kbhit();
 int getch();
+void* File_send(void *arg);
+void* File_receive(void *arg);
 int Cmd_quit(struct User*, int sockfd);
 int Cmd_users(struct User*, int sockfd);
 int Cmd_friend(struct User*, int sockfd);
